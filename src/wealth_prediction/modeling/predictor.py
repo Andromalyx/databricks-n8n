@@ -122,6 +122,102 @@ def evaluate_model_vs_baseline(
     return result
 
 
+def backtest_bundle(
+    df: pd.DataFrame,
+    game: GameConfig,
+    modeling: ModelingConfig,
+    bundle_size: int | None = None,
+    model=None,
+) -> pd.DataFrame:
+    """Walk-forward backtest: for each held-out test draw, take the model's
+    top `bundle_size` numbers -- trained only on data strictly before the
+    test period, same split as `evaluate_model_vs_baseline` -- and check how
+    many were actually drawn.
+
+    One row per test draw: predicted numbers with their model probabilities,
+    the actual draw, which predicted numbers hit, and the count. Compare the
+    result with `summarize_bundle_backtest`, which checks it against the
+    exact chance-level distribution rather than eyeballing the numbers.
+    """
+    bundle_size = bundle_size or game.draw_size
+    if len(df) < 30:
+        raise ValueError(f"Need at least 30 draws for a meaningful walk-forward split, got {len(df)}.")
+
+    panel = build_panel(df, game, history_window=modeling.history_window)
+    train, test = _chronological_split(panel, modeling.test_fraction)
+
+    model = model or GradientBoostingClassifier(random_state=0)
+    model.fit(train[FEATURE_COLUMNS], train["appeared"])
+
+    test = test.copy()
+    test["predicted_probability"] = model.predict_proba(test[FEATURE_COLUMNS])[:, 1]
+
+    draw_lookup = df.set_index("draw_id")
+    number_cols = [f"n{i + 1}" for i in range(game.draw_size)]
+
+    rows = []
+    for draw_id, group in test.groupby("draw_id"):
+        top = group.nlargest(bundle_size, "predicted_probability")
+        actual_numbers = sorted(int(n) for n in draw_lookup.loc[draw_id, number_cols])
+        actual_set = set(actual_numbers)
+        predicted_numbers = top["number"].tolist()
+        hits = [n for n in predicted_numbers if n in actual_set]
+
+        rows.append(
+            {
+                "draw_id": draw_id,
+                "draw_date": draw_lookup.loc[draw_id, "draw_date"],
+                "predicted_numbers": predicted_numbers,
+                "predicted_probabilities": [round(p, 4) for p in top["predicted_probability"]],
+                "actual_numbers": actual_numbers,
+                "hits": hits,
+                "hit_probabilities": [
+                    round(p, 4)
+                    for n, p in zip(predicted_numbers, top["predicted_probability"])
+                    if n in actual_set
+                ],
+                "n_correct": len(hits),
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
+def summarize_bundle_backtest(results: pd.DataFrame, game: GameConfig, bundle_size: int, alpha: float = 0.05) -> dict:
+    """Aggregate a `backtest_bundle` run against the exact chance-level null.
+
+    Picking `bundle_size` numbers uniformly at random (no model at all) and
+    checking overlap with `draw_size` actual winners out of `pool_size` gives
+    Hypergeom(pool_size, draw_size, bundle_size) hits per draw -- that's the
+    correct baseline to compare against, not "0 out of 6" intuition. The
+    per-draw counts are summed and compared to their combined mean/variance
+    under that null via a normal-approximation z-test (accurate once there
+    are a few dozen test draws).
+    """
+    n_draws = len(results)
+    expected_mean_per_draw = bundle_size * game.draw_size / game.pool_size
+    expected_var_per_draw = stats.hypergeom.var(game.pool_size, game.draw_size, bundle_size)
+
+    total_observed = int(results["n_correct"].sum())
+    total_expected = n_draws * expected_mean_per_draw
+    total_var = n_draws * expected_var_per_draw
+    z = (total_observed - total_expected) / np.sqrt(total_var) if total_var > 0 else 0.0
+    p_value = 2 * (1 - stats.norm.cdf(abs(z)))
+
+    return {
+        "n_test_draws": n_draws,
+        "bundle_size": bundle_size,
+        "total_correct": total_observed,
+        "total_possible": n_draws * bundle_size,
+        "observed_avg_correct_per_draw": results["n_correct"].mean(),
+        "chance_avg_correct_per_draw": expected_mean_per_draw,
+        "z_score": z,
+        "p_value": p_value,
+        "beats_chance": bool(results["n_correct"].mean() > expected_mean_per_draw and p_value < alpha),
+        "match_distribution": results["n_correct"].value_counts().sort_index().to_dict(),
+    }
+
+
 def predict_next_draw_scores(
     df: pd.DataFrame, game: GameConfig, modeling: ModelingConfig, model=None
 ) -> pd.DataFrame:

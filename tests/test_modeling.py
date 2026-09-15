@@ -4,9 +4,11 @@ from wealth_prediction.config import ModelingConfig
 from wealth_prediction.data.synthetic import simulate_fair_draws
 from wealth_prediction.modeling.features import FEATURE_COLUMNS, build_panel, next_draw_features
 from wealth_prediction.modeling.predictor import (
+    backtest_bundle,
     evaluate_model_vs_baseline,
     predict_next_draw_scores,
     recommend_number_bundle,
+    summarize_bundle_backtest,
 )
 
 
@@ -64,3 +66,32 @@ def test_recommend_number_bundle_returns_requested_size(game_config):
     assert len(bundle) == 8
     # Sorted descending by predicted probability.
     assert bundle["predicted_probability"].is_monotonic_decreasing
+
+
+def test_backtest_bundle_shape_and_correct_count_bounds(game_config):
+    df = simulate_fair_draws(150, game_config.pool_size, game_config.draw_size, seed=1)
+    modeling_cfg = ModelingConfig(history_window=10, test_fraction=0.3)
+    results = backtest_bundle(df, game_config, modeling_cfg, bundle_size=6)
+    assert len(results) > 0
+    assert set(results.columns) >= {
+        "draw_id", "predicted_numbers", "predicted_probabilities", "actual_numbers", "hits", "n_correct",
+    }
+    assert (results["n_correct"] >= 0).all()
+    assert (results["n_correct"] <= game_config.draw_size).all()
+    assert (results["predicted_numbers"].str.len() == 6).all()
+    # n_correct must equal the length of hits, and every hit must be in both lists.
+    for _, row in results.iterrows():
+        assert row["n_correct"] == len(row["hits"])
+        assert set(row["hits"]) <= set(row["predicted_numbers"]) & set(row["actual_numbers"])
+
+
+def test_summarize_bundle_backtest_on_fair_data_does_not_beat_chance(game_config):
+    # On a genuinely fair process, the bundle's hit rate should track the
+    # exact hypergeometric chance level, not exceed it.
+    df = simulate_fair_draws(400, game_config.pool_size, game_config.draw_size, seed=1)
+    modeling_cfg = ModelingConfig(history_window=10, test_fraction=0.3)
+    results = backtest_bundle(df, game_config, modeling_cfg, bundle_size=6)
+    summary = summarize_bundle_backtest(results, game_config, bundle_size=6, alpha=0.01)
+    assert summary["n_test_draws"] == len(results)
+    assert summary["total_possible"] == len(results) * 6
+    assert not summary["beats_chance"]
