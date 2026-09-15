@@ -71,12 +71,24 @@ def _results_table(results: list[TestResult]) -> str:
     return "\n".join(lines)
 
 
+def _bundle_table(bundle: pd.DataFrame) -> str:
+    lines = ["| Number | Predicted probability | Baseline | Lift |", "|---|---|---|---|"]
+    for _, row in bundle.iterrows():
+        lines.append(
+            f"| {int(row['number'])} | {row['predicted_probability']:.4f} | "
+            f"{row['baseline_probability']:.4f} | {row['lift_over_baseline']:.2f}x |"
+        )
+    return "\n".join(lines)
+
+
 def generate_markdown_report(
     game: GameConfig,
     n_draws: int,
     all_results: list[TestResult],
     scorecard: dict,
     model_summary: str | None,
+    bundle: pd.DataFrame | None,
+    model_beats_baseline: bool,
     figure_paths: dict[str, Path],
     out_path: Path,
 ) -> Path:
@@ -104,6 +116,20 @@ def generate_markdown_report(
     ]
     if model_summary:
         lines += ["## ML model vs. random baseline", "", model_summary, ""]
+
+    if bundle is not None and not bundle.empty:
+        lines += [
+            "## Suggested number bundle (next draw)",
+            "",
+            "**Not a prediction.** These are the numbers the model currently ranks highest, "
+            f"including Markov-transition and pairwise co-occurrence features. "
+            f"Model beats random baseline (see above): "
+            f"**{'YES' if model_beats_baseline else 'NO'}**"
+            + ("" if model_beats_baseline else " -- treat this ranking as noise, not a signal."),
+            "",
+            _bundle_table(bundle),
+            "",
+        ]
 
     if figure_paths:
         lines += ["## Figures", ""]

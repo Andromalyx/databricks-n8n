@@ -12,7 +12,7 @@ from pathlib import Path
 
 from wealth_prediction.config import load_config
 from wealth_prediction.data import loader, synthetic
-from wealth_prediction.modeling.predictor import evaluate_model_vs_baseline
+from wealth_prediction.modeling.predictor import evaluate_model_vs_baseline, recommend_number_bundle
 from wealth_prediction.reporting.report import (
     generate_markdown_report,
     plot_hot_cold,
@@ -67,11 +67,18 @@ def run_audit(df, config, out_dir: Path, run_model: bool = True) -> Path:
     scorecard = bias_detection.randomness_scorecard(all_results)
 
     model_summary = None
+    model_beats_baseline = False
+    bundle = None
     if run_model:
         try:
             logger.info("Evaluating ML model vs. random baseline (walk-forward)...")
             eval_result = evaluate_model_vs_baseline(df, game, config.modeling, alpha=analysis.significance_level)
             model_summary = eval_result.summary()
+            model_beats_baseline = eval_result.model_beats_baseline
+
+            logger.info("Scoring next-draw number bundle...")
+            bundle = recommend_number_bundle(df, game, config.modeling, bundle_size=10)
+            bundle.to_csv(out_dir / "recommended_numbers.csv", index=False)
         except ValueError as exc:
             logger.warning("Skipping model evaluation: %s", exc)
 
@@ -98,6 +105,8 @@ def run_audit(df, config, out_dir: Path, run_model: bool = True) -> Path:
         all_results=all_results,
         scorecard=scorecard,
         model_summary=model_summary,
+        bundle=bundle,
+        model_beats_baseline=model_beats_baseline,
         figure_paths={k: v.relative_to(out_dir) for k, v in figures.items()},
         out_path=out_dir / "report.md",
     )

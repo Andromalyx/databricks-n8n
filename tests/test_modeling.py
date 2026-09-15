@@ -1,7 +1,13 @@
+import numpy as np
+
 from wealth_prediction.config import ModelingConfig
 from wealth_prediction.data.synthetic import simulate_fair_draws
-from wealth_prediction.modeling.features import FEATURE_COLUMNS, build_panel
-from wealth_prediction.modeling.predictor import evaluate_model_vs_baseline
+from wealth_prediction.modeling.features import FEATURE_COLUMNS, build_panel, next_draw_features
+from wealth_prediction.modeling.predictor import (
+    evaluate_model_vs_baseline,
+    predict_next_draw_scores,
+    recommend_number_bundle,
+)
 
 
 def test_build_panel_shape_and_no_nans(game_config):
@@ -12,6 +18,25 @@ def test_build_panel_shape_and_no_nans(game_config):
     assert set(panel["appeared"].unique()) <= {0, 1}
 
 
+def test_build_panel_markov_and_cooccurrence_scores_are_probability_like(game_config):
+    df = simulate_fair_draws(80, game_config.pool_size, game_config.draw_size, seed=1)
+    panel = build_panel(df, game_config, history_window=10)
+    # Each draw's markov_score / cooccurrence_score is Laplace-normalized over
+    # the pool, so it should sum to ~1 across all 45 numbers within a draw.
+    per_draw_sums = panel.groupby("draw_id")[["markov_score", "cooccurrence_score"]].sum()
+    assert np.allclose(per_draw_sums["markov_score"], 1.0, atol=1e-6)
+    assert np.allclose(per_draw_sums["cooccurrence_score"], 1.0, atol=1e-6)
+
+
+def test_next_draw_features_shape_and_no_nans(game_config):
+    df = simulate_fair_draws(60, game_config.pool_size, game_config.draw_size, seed=1)
+    features = next_draw_features(df, game_config, history_window=10)
+    assert len(features) == game_config.pool_size
+    assert not features[FEATURE_COLUMNS].isna().any().any()
+    assert np.isclose(features["markov_score"].sum(), 1.0, atol=1e-6)
+    assert np.isclose(features["cooccurrence_score"].sum(), 1.0, atol=1e-6)
+
+
 def test_evaluate_model_vs_baseline_on_fair_data_shows_no_reliable_edge(game_config):
     # A fair process should not let the model beat the baseline; this is the
     # sanity check that the pipeline doesn't spuriously claim an "edge".
@@ -20,3 +45,22 @@ def test_evaluate_model_vs_baseline_on_fair_data_shows_no_reliable_edge(game_con
     result = evaluate_model_vs_baseline(df, game_config, modeling_cfg, alpha=0.01)
     assert result.n_test_samples > 0
     assert not result.model_beats_baseline
+
+
+def test_predict_next_draw_scores_covers_every_number_and_sums_reasonably(game_config):
+    df = simulate_fair_draws(150, game_config.pool_size, game_config.draw_size, seed=1)
+    modeling_cfg = ModelingConfig(history_window=10, test_fraction=0.3)
+    scores = predict_next_draw_scores(df, game_config, modeling_cfg)
+    assert len(scores) == game_config.pool_size
+    assert set(scores["number"]) == set(range(1, game_config.pool_size + 1))
+    assert (scores["predicted_probability"] >= 0).all()
+    assert (scores["lift_over_baseline"] > 0).all()
+
+
+def test_recommend_number_bundle_returns_requested_size(game_config):
+    df = simulate_fair_draws(150, game_config.pool_size, game_config.draw_size, seed=1)
+    modeling_cfg = ModelingConfig(history_window=10, test_fraction=0.3)
+    bundle = recommend_number_bundle(df, game_config, modeling_cfg, bundle_size=8)
+    assert len(bundle) == 8
+    # Sorted descending by predicted probability.
+    assert bundle["predicted_probability"].is_monotonic_decreasing

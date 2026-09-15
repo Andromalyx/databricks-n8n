@@ -24,7 +24,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import brier_score_loss, log_loss
 
 from wealth_prediction.config import GameConfig, ModelingConfig
-from wealth_prediction.modeling.features import FEATURE_COLUMNS, build_panel
+from wealth_prediction.modeling.features import FEATURE_COLUMNS, build_panel, next_draw_features
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +120,48 @@ def evaluate_model_vs_baseline(
     )
     logger.info(result.summary())
     return result
+
+
+def predict_next_draw_scores(
+    df: pd.DataFrame, game: GameConfig, modeling: ModelingConfig, model=None
+) -> pd.DataFrame:
+    """Every number's estimated appearance probability for the next, not-yet-drawn draw.
+
+    Trains on the *complete* history (no held-out split -- there's nothing to
+    hold out against, since this draw hasn't happened) and scores
+    `next_draw_features`. This is a shortlist tool, not a prediction: read
+    `evaluate_model_vs_baseline`'s result first. If that came back
+    `model_beats_baseline=False` (the expected outcome for a fair lottery),
+    the ranking below is statistically indistinguishable from ranking 45
+    numbers by coin flips, dressed up in real feature names.
+    """
+    panel = build_panel(df, game, history_window=modeling.history_window)
+    model = model or GradientBoostingClassifier(random_state=0)
+    model.fit(panel[FEATURE_COLUMNS], panel["appeared"])
+
+    next_features = next_draw_features(df, game, history_window=modeling.history_window)
+    proba = model.predict_proba(next_features[FEATURE_COLUMNS])[:, 1]
+
+    baseline_rate = game.draw_size / game.pool_size
+    out = next_features[["number"]].copy()
+    out["predicted_probability"] = proba
+    out["baseline_probability"] = baseline_rate
+    out["lift_over_baseline"] = out["predicted_probability"] / baseline_rate
+    return out.sort_values("predicted_probability", ascending=False).reset_index(drop=True)
+
+
+def recommend_number_bundle(
+    df: pd.DataFrame, game: GameConfig, modeling: ModelingConfig, bundle_size: int = 10, model=None
+) -> pd.DataFrame:
+    """Top `bundle_size` numbers by predicted next-draw probability -- a shortlist, not a ticket.
+
+    Deliberately returns more numbers than `game.draw_size`: the point is to
+    surface "these look mildly more likely given recent history", not to
+    claim which exact 6 will be drawn. Always report this alongside
+    `evaluate_model_vs_baseline`'s verdict (see its docstring) so the reader
+    knows whether the ranking has any statistical backing at all.
+    """
+    return predict_next_draw_scores(df, game, modeling, model=model).head(bundle_size)
 
 
 def default_models() -> dict[str, object]:
