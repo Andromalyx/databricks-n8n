@@ -73,7 +73,17 @@ Three sources, chosen with `--source`:
   Required columns: `draw_id, draw_date, n1..n6` (see
   `wealth_prediction.data.loader.validate_schema`).
 
-To populate real data:
+`data/raw/draws.csv` is checked into this repo as the canonical dataset:
+1,365+ real Mega 6/45 draws (2017-10-25 onward), converted from
+[vietvudanh/vietlott-data](https://github.com/vietvudanh/vietlott-data)'s
+`data/power645.jsonl` (MIT licensed; that project's crawler runs from a
+Vietnam-based host since Vietlott blocks other regions). Refresh it by
+re-pulling that repo and re-running the same `date/id/result` →
+`draw_id/draw_date/n1..n6` conversion, rather than the scraper below —
+Vietlott's own site is blocked by the same regional restriction from most
+hosting providers, including this project's sandboxed dev environment.
+
+To attempt a direct scrape instead:
 
 ```bash
 # Best-effort scraper (Vietlott has no documented public API — verify the

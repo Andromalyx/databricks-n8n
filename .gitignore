@@ -5,9 +5,12 @@ __pycache__/
 .venv/
 venv/
 
-# raw/processed lottery draw data & generated reports are run artifacts, not source
+# raw/processed lottery draw data & generated reports are run artifacts, not
+# source -- except draws.csv, which is checked in as the canonical dataset
+# (sourced from https://github.com/vietvudanh/vietlott-data, MIT licensed).
 data/raw/*
 !data/raw/.gitkeep
+!data/raw/draws.csv
 data/processed/*
 !data/processed/.gitkeep
 reports/figures/*
