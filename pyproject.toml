@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wealth-prediction"
+version = "0.1.0"
+description = "Statistical audit of Vietlott 6/45 draws: randomness/normality testing and an honest ML-vs-random-baseline evaluation."
+requires-python = ">=3.10"
+readme = "README.md"
+
+[project.scripts]
+wealth-prediction = "wealth_prediction.pipeline:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

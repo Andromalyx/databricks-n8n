@@ -1,0 +1,38 @@
+# Game definition for Vietlott Mega 6/45: 6 numbers drawn without replacement
+# from a pool of 45 (1..45). All null-distribution simulations and combinatorial
+# checks in this project derive from these three numbers, so change them here
+# if you retarget a different game (e.g. Power 6/55).
+game:
+  name: "Vietlott Mega 6/45"
+  pool_size: 45
+  draw_size: 6
+  ticket_price_vnd: 10000
+
+data:
+  raw_dir: "data/raw"
+  processed_dir: "data/processed"
+  draws_file: "draws.csv"
+
+# Best-effort scraper config. Vietlott has no documented public API contract;
+# this endpoint is the commonly reverse-engineered "desktop" search endpoint.
+# Verify field names in scraper.py against a live response before relying on it,
+# and prefer `loader.load_csv` with a manually exported results file if it drifts.
+scraper:
+  base_url: "https://api.vietlott.vn/v5/desktop/vi/issearch/index/power645"
+  page_size: 50
+  max_pages: 20
+  timeout_s: 15
+  max_retries: 3
+  retry_backoff_s: 2.0
+
+analysis:
+  monte_carlo_sims: 20000
+  significance_level: 0.05
+  random_seed: 42
+  # Split the history in half to check for drift (e.g. ball-set wear/replacement,
+  # RNG reseeding) between the earlier and later era of draws.
+  split_half_drift_test: true
+
+modeling:
+  history_window: 20 # draws of trailing frequency/gap features per number
+  test_fraction: 0.2 # walk-forward holdout fraction (chronological, not shuffled)

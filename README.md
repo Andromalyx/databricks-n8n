@@ -1,50 +1,123 @@
-# 🧱 databricks-n8n
+# wealth-prediction
 
-Self-host [n8n](https://n8n.io/) as a [Databricks Apps](https://docs.databricks.com/en/dev-tools/databricks-apps/index.html)!
+A statistical audit toolkit for Vietlott Mega 6/45 lottery draws: does the
+historical result set look like a fair, independent, uniform-random process,
+or is there detectable structure (drift, bias, an exploitable pattern)?
 
-## 🗂️ Directory Structure
+## Read this first: what this project can and can't do
 
-The basic Databricks Apps directory structure:
+A regulated 6/45 draw picks 6 numbers uniformly at random from 45, without
+replacement, independently each time. If it's actually fair, **no model, no
+matter how sophisticated, can predict future numbers better than chance** —
+that's not a limitation of this codebase, it's what "fair" mathematically
+means. So this project is not a numbers-picking system. It's an audit:
+
+1. **Randomness/normality testing** — do observed draws match what a fair
+   process would produce (uniformity, independence, distribution shape)?
+2. **Bias/drift detection** — is there a hot/cold number, or a change
+   partway through history, that a fair process wouldn't produce?
+3. **An honest ML evaluation** — train a real classifier on real features,
+   evaluate it walk-forward (chronological holdout, never shuffled), and
+   formally test whether it beats the trivial constant-probability baseline
+   by more than sampling noise. If the lottery is fair, the expected and
+   correct outcome is "no" — that's a successful result, not a failed model.
+
+A rejected test is a prompt to investigate (more data, a data-collection
+artifact, look for a specific mechanism) — not proof of fraud. With ~10
+tests at alpha=0.05 you expect about one false positive by chance; the
+report's Fisher-combined omnibus p-value is the number that actually matters,
+not any single row in the table.
+
+## Project layout
 
 ```
 .
-├── README.md
-├── app.py
-├── app.yaml
-└── utils
-    ├── __init__.py
-    └── jsrunner.py
+├── config/config.yaml                 # game params, scraper, analysis, modeling knobs
+├── src/wealth_prediction/
+│   ├── config.py                      # typed config loading
+│   ├── data/
+│   │   ├── synthetic.py               # fair/biased/drifting draw generators (also the Monte Carlo null engine)
+│   │   ├── scraper.py                 # best-effort Vietlott history scraper
+│   │   └── loader.py                  # CSV load/save + schema validation
+│   ├── stats/
+│   │   ├── uniformity.py              # chi-square goodness-of-fit per number
+│   │   ├── normality.py               # Shapiro/D'Agostino/KS + Monte Carlo fair-null KS test
+│   │   ├── independence.py            # runs test, Ljung-Box, pairwise co-occurrence, gap test
+│   │   └── bias_detection.py          # hot/cold numbers, split-half drift, revenue correlation, scorecard
+│   ├── modeling/
+│   │   ├── features.py                # leakage-safe (backward-looking only) feature panel
+│   │   └── predictor.py               # model vs. random-baseline walk-forward evaluation
+│   ├── reporting/report.py            # figures + markdown report generation
+│   └── pipeline.py                    # CLI orchestrator
+├── scripts/run_analysis.py            # thin CLI wrapper
+└── tests/                             # pytest suite (fair data should pass, biased/drifting should be flagged)
 ```
 
-- `app.py`: Your main app logic.
-- `app.yaml` (optional): Your app configurations. Contains the entrypoint command (e.g. `python app.py`) and any environmental variables. This is where you define the application port as 8000 (required by Databricks Apps). 
-- `requirements.txt` (optional): Dependencies required for the project.
-- `utils/`: Utility functions for initializing NodeJS in Python.
+## Setup
 
-## ⚙️ Installation
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+pip install -e .          # installs the `wealth-prediction` CLI entry point
+```
 
-To install and deploy this app in Databricks Apps, clone the repository to your computer and either manually upload these files to your Databricks workspace, or sync the files to your Databricks workspace via Databricks SDK, i.e.,
+## Getting data
 
-`databricks sync --watch . /Workspace/Users/path/to/databricks_n8n`
+Three sources, chosen with `--source`:
 
-To deploy the app in your Databricks Workspace, go to Compute > Apps > Create app > Custom. 
+- `synthetic` (default) — simulate a fair 6/45 process. Use this to see the
+  pipeline run end-to-end with zero setup.
+- `synthetic-biased` — simulate a deliberately biased process, to sanity-check
+  that the detectors actually have power (they should flag this as non-fair).
+- `csv` — load real history from `data/raw/draws.csv` (or `--data <path>`).
+  Required columns: `draw_id, draw_date, n1..n6` (see
+  `wealth_prediction.data.loader.validate_schema`).
 
-Enter your app name and optional description. Skip app resources, and create app. First deployment will take ~5 minutes to get container, and upload and install app. Subsequent redeployment only takes less than 10s.
+To populate real data:
 
-Once the app is running, you can click the app URL to use it. 
+```bash
+# Best-effort scraper (Vietlott has no documented public API — verify the
+# JSON field mapping in scraper.py against a live response first; see its
+# module docstring for what to fix if it starts failing).
+python -m wealth_prediction.data.scraper --out data/raw/draws.csv --pages 20
 
-Click on the "Logs" tab to view app logs.
+# Or just drop in a manually exported CSV matching the schema above.
+```
 
-## 👷‍♂️ Usage
+## Running the audit
 
-To make Databricks services accessible in n8n, first set up Databricks credentials in n8n using your personal access tokens (PAT).
+```bash
+python -m wealth_prediction.pipeline --source synthetic --n-draws 500
+python -m wealth_prediction.pipeline --source csv --data data/raw/draws.csv
+python -m wealth_prediction.pipeline --source synthetic-biased --n-draws 500  # sanity check
+```
 
-Then you can use n8n's [HTTP node](https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.httprequest/) and reference [Databricks REST API docs](https://docs.databricks.com/api/workspace/introduction) To access Databricks workspace services (e.g. Workflows, Compute, ML, Model Serving, Vector Search, etc.).
+Outputs land in `reports/`: `report.md` (test table + omnibus verdict + ML
+summary), `figures/*.png`, and per-number CSVs (`hot_cold_numbers.csv`,
+`per_number_significance.csv`).
 
-For inspiration on what workflows you can create, see [n8n workflow automation templates](https://n8n.io/workflows/).
+Flags: `--out-dir`, `--config <path>`, `--no-model` (skip the ML evaluation,
+which is the slowest step).
 
-## 🗒️ Note
+## Tests
 
-By default, n8n uses SQLite to save credentials, past executions, and workflows. n8n also supports PostgresDB, which you can set in app.yaml using the environment variable `DB_TYPE`. See [n8n docs](https://docs.n8n.io/hosting/configuration/supported-databases-settings/) for details.
+```bash
+pytest
+```
 
-__WARNING__: If you choose to use n8n's default SQLite database, then all your workflows and credentials will be removed when you delete the app. So you should use an external transactional database to persist app history.
+The suite checks both directions: tests should **fail to reject** fairness on
+`simulate_fair_draws` output, and **reject** it on `simulate_biased_draws` /
+`simulate_drifting_draws` output — i.e., the detectors have to prove they can
+actually detect something before we trust them on real data.
+
+## Extending
+
+- **Revenue/jackpot correlation**: `stats.bias_detection.revenue_correlation_test`
+  takes an external DataFrame (draw_id + a sales/jackpot column) and tests
+  whether per-draw sum correlates with it — the closest thing here to testing
+  an "optimize revenue, avoid the winner" hypothesis. Vietlott doesn't publish
+  sales data alongside results, so you'll need to supply your own series.
+- **Different game**: everything derives from `config/config.yaml`'s
+  `pool_size`/`draw_size` — point it at Power 6/55 or another lottery and the
+  combinatorics (pairwise co-occurrence rate, gap geometric parameter, uniform
+  expected counts) adjust automatically.
