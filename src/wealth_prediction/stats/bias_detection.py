@@ -13,10 +13,12 @@ from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
+import statsmodels.api as sm
 from scipy import stats
 from statsmodels.stats.proportion import proportion_confint
 
 from wealth_prediction.config import GameConfig
+from wealth_prediction.modeling.features import build_panel
 from wealth_prediction.stats import TestResult
 from wealth_prediction.stats.uniformity import number_frequencies
 
@@ -44,6 +46,59 @@ def hot_cold_numbers(df: pd.DataFrame, game: GameConfig, ci: float = 0.95) -> pd
     )
     out["distinguishable_from_baseline"] = (out["ci_low"] > baseline) | (out["ci_high"] < baseline)
     return out.sort_values("observed_rate", ascending=False).reset_index(drop=True)
+
+
+def gap_hazard_curve(
+    df: pd.DataFrame, game: GameConfig, history_window: int = 20, max_gap: int | None = 15
+) -> pd.DataFrame:
+    """Empirical P(appears in draw t | gap since last appearance = g), binned by g.
+
+    Tests the "a number that's been cold longer becomes more likely to hit"
+    intuition directly against the data. Under a fair, memoryless process
+    this should be flat at draw_size/pool_size for every gap value. A real
+    "cap" effect (hazard rising with gap, then plateauing) would show up
+    here as a curve that climbs and then flattens; a gambler's-fallacy-proof
+    fair process shows a flat line with only sampling noise around it.
+    `max_gap` bins every gap at or above it into one right-censored bucket,
+    since very long gaps get sparse fast.
+    """
+    panel = build_panel(df, game, history_window=history_window)
+    gap = panel["gap_since_last"].to_numpy()
+    if max_gap is not None:
+        gap = np.minimum(gap, max_gap)
+    panel = panel.assign(gap_bucket=gap)
+
+    curve = panel.groupby("gap_bucket")["appeared"].agg(n_observations="count", n_hits="sum", hit_rate="mean")
+    curve = curve.reset_index().rename(columns={"gap_bucket": "gap"})
+    curve["baseline_rate"] = game.draw_size / game.pool_size
+    return curve.sort_values("gap").reset_index(drop=True)
+
+
+def gap_hazard_trend_test(
+    df: pd.DataFrame, game: GameConfig, history_window: int = 20, alpha: float = 0.05
+) -> TestResult:
+    """Logistic regression of appeared ~ gap_since_last across the full historical panel.
+
+    The formal test behind `gap_hazard_curve`: a significant positive
+    coefficient means longer gaps genuinely raise appearance odds (the
+    "overdue number" effect); a coefficient indistinguishable from zero
+    means the memoryless/fair model already explains the data.
+    """
+    panel = build_panel(df, game, history_window=history_window)
+    X = sm.add_constant(panel["gap_since_last"].to_numpy())
+    y = panel["appeared"].to_numpy()
+    fitted = sm.Logit(y, X).fit(disp=0)
+
+    return TestResult(
+        "Logistic regression trend (P(appear) ~ gap_since_last)",
+        statistic=fitted.params[1],
+        p_value=fitted.pvalues[1],
+        alpha=alpha,
+        interpretation=(
+            "H0: gap since last appearance has no effect on the odds of appearing "
+            "(coefficient = 0, i.e. memoryless/fair)."
+        ),
+    )
 
 
 def split_half_drift_test(df: pd.DataFrame, game: GameConfig, alpha: float = 0.05) -> TestResult:

@@ -5,6 +5,7 @@ from wealth_prediction.stats.independence import (
     gap_distribution_test,
     ljung_box_autocorrelation,
     pairwise_cooccurrence_test,
+    repeat_rate_test,
     runs_test,
 )
 
@@ -39,3 +40,9 @@ def test_gap_distribution_runs_without_error(game_config):
     df = simulate_fair_draws(500, game_config.pool_size, game_config.draw_size, seed=5)
     result = gap_distribution_test(df, game_config)
     assert 0.0 <= result.p_value <= 1.0
+
+
+def test_repeat_rate_fails_to_reject_fair_data(game_config):
+    df = simulate_fair_draws(2000, game_config.pool_size, game_config.draw_size, seed=5)
+    result = repeat_rate_test(df, game_config)
+    assert result.p_value > 0.01

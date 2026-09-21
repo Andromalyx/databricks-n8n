@@ -16,9 +16,10 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 from statsmodels.stats.diagnostic import acorr_ljungbox
+from statsmodels.stats.proportion import proportions_ztest
 
 from wealth_prediction.config import GameConfig
-from wealth_prediction.data.loader import to_long_format
+from wealth_prediction.data.loader import numbers_matrix, to_long_format
 from wealth_prediction.stats import TestResult
 
 
@@ -84,6 +85,39 @@ def pairwise_cooccurrence_test(df: pd.DataFrame, game: GameConfig, alpha: float 
         "Chi-square goodness-of-fit (pairwise co-occurrence)", chi2, p, alpha,
         f"H0: every one of {len(pairs)} number pairs co-occurs at rate "
         f"{p_pair:.5f} (expected {expected:.2f} times each over {n_draws} draws).",
+    )
+
+
+def repeat_rate_test(df: pd.DataFrame, game: GameConfig, alpha: float = 0.05) -> TestResult:
+    """Does a number that appeared in draw t-1 repeat in draw t more or less often than one that didn't?
+
+    Directly tests the "hot/cold is tied to overlap with the immediately
+    preceding draw" idea in its simplest form: under independence,
+    P(appear in draw t | was in draw t-1) should equal
+    P(appear in draw t | wasn't in draw t-1), and both should equal
+    draw_size/pool_size. This is a plainer, single-number version of what
+    `modeling.features`'s markov_score/cooccurrence_score already encode as
+    model inputs -- useful as a standalone sanity check independent of any
+    trained model.
+    """
+    matrix = numbers_matrix(df, game)
+    n_draws, pool_size = len(matrix), game.pool_size
+    appeared = np.zeros((n_draws, pool_size), dtype=bool)
+    for t in range(n_draws):
+        appeared[t, matrix[t] - 1] = True
+
+    was_in_previous = appeared[:-1].ravel()
+    current = appeared[1:].ravel()
+
+    n1, x1 = int(was_in_previous.sum()), int(current[was_in_previous].sum())
+    n2, x2 = int((~was_in_previous).sum()), int(current[~was_in_previous].sum())
+
+    stat, p_value = proportions_ztest([x1, x2], [n1, n2])
+
+    return TestResult(
+        "Two-proportion z-test (repeat rate vs. previous draw)", stat, p_value, alpha,
+        f"H0: P(appear | was in previous draw)={x1 / n1:.4f} equals "
+        f"P(appear | wasn't in previous draw)={x2 / n2:.4f}.",
     )
 
 
