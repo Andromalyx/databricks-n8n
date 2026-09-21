@@ -218,6 +218,137 @@ def summarize_bundle_backtest(results: pd.DataFrame, game: GameConfig, bundle_si
     }
 
 
+def backtest_rank_buckets(
+    df: pd.DataFrame,
+    game: GameConfig,
+    modeling: ModelingConfig,
+    top_n: int = 10,
+    bottom_n: int = 10,
+    model=None,
+) -> pd.DataFrame:
+    """Walk-forward: score every (test draw, number) pair and bucket each
+    number by its within-draw predicted-probability rank.
+
+    Same train/test split and model as `evaluate_model_vs_baseline`. Returns
+    one row per (draw_id, number) in the held-out test period: its rank
+    within that draw (1 = highest predicted probability), a `bucket` label
+    ("top" = top_n highest, "bottom" = bottom_n lowest, "middle" = the rest),
+    and whether it was actually drawn (`appeared`). Feed this to
+    `summarize_rank_buckets` to test whether winners cluster in the extremes.
+    """
+    if len(df) < 30:
+        raise ValueError(f"Need at least 30 draws for a meaningful walk-forward split, got {len(df)}.")
+    if top_n + bottom_n > game.pool_size:
+        raise ValueError(f"top_n + bottom_n ({top_n + bottom_n}) exceeds pool_size ({game.pool_size}).")
+
+    panel = build_panel(df, game, history_window=modeling.history_window)
+    train, test = _chronological_split(panel, modeling.test_fraction)
+
+    model = model or GradientBoostingClassifier(random_state=0)
+    model.fit(train[FEATURE_COLUMNS], train["appeared"])
+
+    test = test.copy()
+    test["predicted_probability"] = model.predict_proba(test[FEATURE_COLUMNS])[:, 1]
+    # build_panel's full (draw_id x number) grid guarantees every draw_id group
+    # has exactly pool_size rows, so a global rank-within-group is enough --
+    # no need for a per-group apply (which pandas >=2.2 also warns against
+    # when the callable touches the grouping column).
+    test["rank"] = (
+        test.groupby("draw_id")["predicted_probability"].rank(method="first", ascending=False).astype(int)
+    )
+
+    rank = test["rank"].to_numpy()
+    bucket = np.full(len(test), "middle", dtype=object)
+    bucket[rank <= top_n] = "top"
+    bucket[rank > game.pool_size - bottom_n] = "bottom"
+    test["bucket"] = bucket
+
+    return test[["draw_id", "number", "predicted_probability", "rank", "bucket", "appeared"]].reset_index(drop=True)
+
+
+def summarize_rank_buckets(bucket_results: pd.DataFrame, game: GameConfig, alpha: float = 0.05) -> dict:
+    """Aggregate `backtest_rank_buckets`: hit rate per bucket vs. the fair
+    baseline rate draw_size/pool_size, plus the literal hypothesis this is
+    built to test -- do winners cluster in the extremes (top+bottom) rather
+    than the middle?
+
+    Every number's true marginal appearance probability is draw_size/pool_size
+    regardless of rank if the lottery is fair, so any bucket's observed rate
+    drifting from that baseline (via a one-sample binomial test), or the
+    extremes' rate differing from the middle's (via a two-proportion z-test),
+    is the actual signal to look for -- not eyeballing which bucket "looks
+    higher" in a small sample.
+    """
+    baseline_rate = game.draw_size / game.pool_size
+    summary: dict = {}
+
+    for bucket_name, group in bucket_results.groupby("bucket"):
+        n_number_draws = len(group)
+        n_hits = int(group["appeared"].sum())
+        test_result = stats.binomtest(n_hits, n_number_draws, baseline_rate, alternative="two-sided")
+        summary[bucket_name] = {
+            "n_number_draws": n_number_draws,
+            "n_hits": n_hits,
+            "observed_rate": n_hits / n_number_draws,
+            "baseline_rate": baseline_rate,
+            "mean_predicted_probability": group["predicted_probability"].mean(),
+            "p_value": test_result.pvalue,
+            "significant": test_result.pvalue < alpha,
+        }
+
+    extremes = bucket_results[bucket_results["bucket"] != "middle"]
+    middle = bucket_results[bucket_results["bucket"] == "middle"]
+    n1, n2 = len(extremes), len(middle)
+    x1, x2 = int(extremes["appeared"].sum()), int(middle["appeared"].sum())
+    p_pool = (x1 + x2) / (n1 + n2)
+    se = np.sqrt(p_pool * (1 - p_pool) * (1 / n1 + 1 / n2))
+    extremes_rate, middle_rate = x1 / n1, x2 / n2
+    z = (extremes_rate - middle_rate) / se if se > 0 else 0.0
+    p_value = 2 * (1 - stats.norm.cdf(abs(z)))
+
+    summary["extremes_vs_middle"] = {
+        "extremes_rate": extremes_rate,
+        "middle_rate": middle_rate,
+        "z_score": z,
+        "p_value": p_value,
+        "extremes_hit_more_than_middle": bool(extremes_rate > middle_rate and p_value < alpha),
+    }
+    return summary
+
+
+def calibration_by_probability_band(
+    bucket_results: pd.DataFrame, game: GameConfig, band_width: float = 0.02
+) -> pd.DataFrame:
+    """Observed hit rate for numbers near baseline probability vs. clearly above/below it.
+
+    Answers "does a number sitting at ~13% actually appear ~13% of the time,
+    regardless of which rank bucket it landed in?" -- i.e. whether a bottom-10
+    ranking with a still-near-baseline probability is a meaningfully
+    suppressed forecast or just noise around the true rate.
+    """
+    baseline_rate = game.draw_size / game.pool_size
+    edges = [0.0, baseline_rate - band_width, baseline_rate + band_width, 1.0]
+    labels = ["below baseline band", "near baseline", "above baseline band"]
+
+    rows = []
+    for lo, hi, label in zip(edges[:-1], edges[1:], labels):
+        mask = (bucket_results["predicted_probability"] >= lo) & (bucket_results["predicted_probability"] < hi)
+        group = bucket_results[mask]
+        if group.empty:
+            continue
+        rows.append(
+            {
+                "band": label,
+                "probability_range": f"[{lo:.3f}, {hi:.3f})",
+                "n_number_draws": len(group),
+                "n_hits": int(group["appeared"].sum()),
+                "observed_rate": group["appeared"].mean(),
+                "baseline_rate": baseline_rate,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def predict_next_draw_scores(
     df: pd.DataFrame, game: GameConfig, modeling: ModelingConfig, model=None
 ) -> pd.DataFrame:

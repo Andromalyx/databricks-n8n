@@ -5,10 +5,13 @@ from wealth_prediction.data.synthetic import simulate_fair_draws
 from wealth_prediction.modeling.features import FEATURE_COLUMNS, build_panel, next_draw_features
 from wealth_prediction.modeling.predictor import (
     backtest_bundle,
+    backtest_rank_buckets,
+    calibration_by_probability_band,
     evaluate_model_vs_baseline,
     predict_next_draw_scores,
     recommend_number_bundle,
     summarize_bundle_backtest,
+    summarize_rank_buckets,
 )
 
 
@@ -95,3 +98,40 @@ def test_summarize_bundle_backtest_on_fair_data_does_not_beat_chance(game_config
     assert summary["n_test_draws"] == len(results)
     assert summary["total_possible"] == len(results) * 6
     assert not summary["beats_chance"]
+
+
+def test_backtest_rank_buckets_partitions_every_number_every_draw(game_config):
+    df = simulate_fair_draws(300, game_config.pool_size, game_config.draw_size, seed=1)
+    modeling_cfg = ModelingConfig(history_window=10, test_fraction=0.3)
+    bucketed = backtest_rank_buckets(df, game_config, modeling_cfg, top_n=10, bottom_n=10)
+
+    n_test_draws = bucketed["draw_id"].nunique()
+    assert len(bucketed) == n_test_draws * game_config.pool_size
+    counts = bucketed.groupby("draw_id")["bucket"].value_counts().unstack(fill_value=0)
+    assert (counts["top"] == 10).all()
+    assert (counts["bottom"] == 10).all()
+    assert (counts["middle"] == game_config.pool_size - 20).all()
+    assert set(bucketed["appeared"].unique()) <= {0, 1}
+
+
+def test_summarize_rank_buckets_on_fair_data_shows_no_extremes_effect(game_config):
+    # On genuinely fair data every bucket's hit rate should hover around the
+    # baseline rate; the extremes should not significantly beat the middle.
+    df = simulate_fair_draws(400, game_config.pool_size, game_config.draw_size, seed=1)
+    modeling_cfg = ModelingConfig(history_window=10, test_fraction=0.3)
+    bucketed = backtest_rank_buckets(df, game_config, modeling_cfg, top_n=10, bottom_n=10)
+    summary = summarize_rank_buckets(bucketed, game_config, alpha=0.01)
+
+    assert set(summary.keys()) >= {"top", "bottom", "middle", "extremes_vs_middle"}
+    for bucket_name in ("top", "bottom", "middle"):
+        assert summary[bucket_name]["n_number_draws"] > 0
+    assert not summary["extremes_vs_middle"]["extremes_hit_more_than_middle"]
+
+
+def test_calibration_by_probability_band_covers_all_rows(game_config):
+    df = simulate_fair_draws(300, game_config.pool_size, game_config.draw_size, seed=1)
+    modeling_cfg = ModelingConfig(history_window=10, test_fraction=0.3)
+    bucketed = backtest_rank_buckets(df, game_config, modeling_cfg, top_n=10, bottom_n=10)
+    calibration = calibration_by_probability_band(bucketed, game_config, band_width=0.02)
+    assert calibration["n_number_draws"].sum() == len(bucketed)
+    assert (calibration["observed_rate"] >= 0).all()
