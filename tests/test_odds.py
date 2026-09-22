@@ -7,6 +7,7 @@ from wealth_prediction.stats.odds import (
     main_match_distribution,
     multi_ticket_probability,
     prize_table_probabilities,
+    score_ticket,
 )
 
 
@@ -70,3 +71,31 @@ def test_prize_table_probabilities_gold_split_sums_to_main_match_probability():
     dist = main_match_distribution(35, 5)
     total = sum(r.probability for r in results)
     assert total == pytest.approx(dist[4])
+
+
+LOTTO_535_TIERS = [
+    PrizeTier("Jackpot", 5, True, None),
+    PrizeTier("Giai Nhat", 5, False, 10_000_000),
+    PrizeTier("Giai Nhi", 4, True, 5_000_000),
+    PrizeTier("Giai Ba", 4, False, 500_000),
+    PrizeTier("Giai Tu", 3, True, 100_000),
+    PrizeTier("Giai Nam", 3, False, 30_000),
+    PrizeTier("Khuyen Khich", 2, True, 10_000),
+    PrizeTier("Khuyen Khich", 1, True, 10_000),
+    PrizeTier("Khuyen Khich", 0, True, 10_000),
+]
+
+
+def test_score_ticket_matches_exact_tier():
+    tier = score_ticket(main_matches=4, gold_match=True, tiers=LOTTO_535_TIERS)
+    assert tier.name == "Giai Nhi"
+
+
+def test_score_ticket_returns_none_for_a_real_loss():
+    # 2 main matches without gold isn't listed in the table -- a genuine non-win.
+    assert score_ticket(main_matches=2, gold_match=False, tiers=LOTTO_535_TIERS) is None
+
+
+def test_score_ticket_jackpot():
+    tier = score_ticket(main_matches=5, gold_match=True, tiers=LOTTO_535_TIERS)
+    assert tier.name == "Jackpot"

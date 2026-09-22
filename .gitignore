@@ -8,11 +8,13 @@ venv/
 # raw/processed lottery draw data & generated reports are run artifacts, not
 # source -- except the draws_*.csv datasets, which are checked in as the
 # canonical datasets (sourced from https://github.com/vietvudanh/vietlott-data,
-# MIT licensed): draws.csv is Mega 6/45, draws_535.csv is Power 5/35.
+# MIT licensed): draws.csv is Mega 6/45, draws_535.csv is Power 5/35 main
+# numbers, draws_535_gold.csv is Power 5/35's gold/special number.
 data/raw/*
 !data/raw/.gitkeep
 !data/raw/draws.csv
 !data/raw/draws_535.csv
+!data/raw/draws_535_gold.csv
 data/processed/*
 !data/processed/.gitkeep
 reports*/figures/*

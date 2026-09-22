@@ -108,6 +108,22 @@ def prize_table_probabilities(
     return results
 
 
+def score_ticket(main_matches: int, gold_match: bool, tiers: list[PrizeTier]) -> PrizeTier | None:
+    """Which tier (if any) a real (main_matches, gold_match) outcome wins, from a prize table.
+
+    Matches the most specific applicable tier: an exact (main_matches,
+    gold_match) tier first, falling back to a gold_match=None tier (gold
+    irrelevant) for that main_matches count. Returns None if no tier applies
+    (a real loss, not just an unlisted combination).
+    """
+    for tier in tiers:
+        if tier.main_matches != main_matches:
+            continue
+        if tier.gold_match is None or tier.gold_match == gold_match:
+            return tier
+    return None
+
+
 def multi_ticket_probability(single_ticket_probability: float, n_distinct_tickets: int) -> float:
     """P(at least one of n_distinct_tickets wins) for tickets covering DIFFERENT
     combinations, all played against the same single draw.

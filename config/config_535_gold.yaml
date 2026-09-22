@@ -1,0 +1,25 @@
+# Game definition for the Vietlott Lotto 5/35 "gold"/special-number draw:
+# 1 number drawn from a pool of 12 (1..12), independent of the 5-of-35 main
+# draw. Same dataset lineage as config_535.yaml (vietvudanh/vietlott-data's
+# power535.jsonl) -- data/raw/draws_535_gold.csv holds the 6th element of
+# each record, which is this gold number, not a repeat of the main draw.
+game:
+  name: "Vietlott Lotto 5/35 (gold number)"
+  pool_size: 12
+  draw_size: 1
+  ticket_price_vnd: 10000
+
+data:
+  raw_dir: "data/raw"
+  processed_dir: "data/processed"
+  draws_file: "draws_535_gold.csv"
+
+analysis:
+  monte_carlo_sims: 20000
+  significance_level: 0.05
+  random_seed: 42
+  split_half_drift_test: true
+
+modeling:
+  history_window: 20
+  test_fraction: 0.2
