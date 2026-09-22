@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from wealth_prediction.data.loader import numbers_matrix, save_csv, to_long_format, validate_schema
+from wealth_prediction.data.loader import find_missing_draw_id_runs, numbers_matrix, save_csv, to_long_format, validate_schema
 from wealth_prediction.data.synthetic import simulate_fair_draws
 
 
@@ -50,3 +50,15 @@ def test_to_long_format_row_count(game_config):
     df = simulate_fair_draws(15, game_config.pool_size, game_config.draw_size, seed=1)
     long_df = to_long_format(df, game_config)
     assert len(long_df) == 15 * game_config.draw_size
+
+
+def test_find_missing_draw_id_runs_empty_for_contiguous_history(game_config):
+    df = simulate_fair_draws(20, game_config.pool_size, game_config.draw_size, seed=1)
+    assert find_missing_draw_id_runs(df) == []
+
+
+def test_find_missing_draw_id_runs_detects_holes(game_config):
+    df = simulate_fair_draws(20, game_config.pool_size, game_config.draw_size, seed=1)
+    # Drop two separate runs of missing draw_ids: 5-6 and 10-12.
+    df = df[~df["draw_id"].isin([5, 6, 10, 11, 12])].reset_index(drop=True)
+    assert find_missing_draw_id_runs(df) == [(5, 6), (10, 12)]

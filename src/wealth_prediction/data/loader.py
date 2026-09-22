@@ -61,6 +61,39 @@ def validate_schema(df: pd.DataFrame, game: GameConfig) -> None:
         raise ValueError("Duplicate draw_id values found.")
 
 
+def find_missing_draw_id_runs(df: pd.DataFrame) -> list[tuple[int, int]]:
+    """Consecutive-run ranges of missing draw_ids between the min and max present.
+
+    A crawled dataset can have real holes (source site downtime, IP blocking,
+    etc.) rather than a clean sequential history. Gap-based tests
+    (`stats.independence.gap_distribution_test`, `stats.bias_detection.
+    gap_hazard_curve`) compute "draws since last appearance" from draw_id
+    arithmetic, so an undetected hole silently inflates gaps that happen to
+    span it -- this showed up in practice as a spurious, wildly significant
+    gap-distribution rejection on a real dataset that turned out to have a
+    48-draw crawler gap, not a biased game. Returns [] for a fully
+    contiguous history.
+    """
+    ids = df["draw_id"].to_numpy()
+    if len(ids) == 0:
+        return []
+    present = set(int(i) for i in ids)
+    missing = sorted(set(range(min(present), max(present) + 1)) - present)
+    if not missing:
+        return []
+
+    runs: list[tuple[int, int]] = []
+    start = prev = missing[0]
+    for i in missing[1:]:
+        if i == prev + 1:
+            prev = i
+        else:
+            runs.append((start, prev))
+            start = prev = i
+    runs.append((start, prev))
+    return runs
+
+
 def load_csv(path: str | Path, game: GameConfig) -> pd.DataFrame:
     """Load and validate a draw-history CSV, sorted chronologically by draw_id."""
     path = Path(path)
@@ -73,6 +106,19 @@ def load_csv(path: str | Path, game: GameConfig) -> pd.DataFrame:
     validate_schema(df, game)
     df = df.sort_values("draw_id").reset_index(drop=True)
     logger.info("Loaded %d draws from %s", len(df), path)
+
+    missing_runs = find_missing_draw_id_runs(df)
+    if missing_runs:
+        total_missing = sum(end - start + 1 for start, end in missing_runs)
+        logger.warning(
+            "%d missing draw_id(s) in %d run(s) (largest: %d draws): %s -- "
+            "gap-based tests (gap_distribution_test, gap_hazard_curve) may be "
+            "distorted by inter-appearance gaps that span these holes.",
+            total_missing,
+            len(missing_runs),
+            max(end - start + 1 for start, end in missing_runs),
+            missing_runs,
+        )
     return df
 
 

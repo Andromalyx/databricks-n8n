@@ -6,16 +6,18 @@ __pycache__/
 venv/
 
 # raw/processed lottery draw data & generated reports are run artifacts, not
-# source -- except draws.csv, which is checked in as the canonical dataset
-# (sourced from https://github.com/vietvudanh/vietlott-data, MIT licensed).
+# source -- except the draws_*.csv datasets, which are checked in as the
+# canonical datasets (sourced from https://github.com/vietvudanh/vietlott-data,
+# MIT licensed): draws.csv is Mega 6/45, draws_535.csv is Power 5/35.
 data/raw/*
 !data/raw/.gitkeep
 !data/raw/draws.csv
+!data/raw/draws_535.csv
 data/processed/*
 !data/processed/.gitkeep
-reports/figures/*
+reports*/figures/*
 !reports/figures/.gitkeep
-reports/*.md
-reports/*.csv
+reports*/*.md
+reports*/*.csv
 *.sqlite
 *.db

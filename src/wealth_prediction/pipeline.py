@@ -31,6 +31,8 @@ def run_audit(df, config, out_dir: Path, run_model: bool = True) -> Path:
     fig_dir = out_dir / "figures"
     fig_dir.mkdir(parents=True, exist_ok=True)
 
+    missing_draw_id_runs = loader.find_missing_draw_id_runs(df)
+
     logger.info("Running uniformity tests...")
     chi2_uniform = uniformity.chi_square_uniformity_test(df, game, analysis.significance_level)
     per_number = uniformity.per_number_significance(df, game, analysis.significance_level)
@@ -46,10 +48,14 @@ def run_audit(df, config, out_dir: Path, run_model: bool = True) -> Path:
     ljung_box = independence.ljung_box_autocorrelation(stat_df["sum"].to_numpy(), alpha=analysis.significance_level)
     cooccurrence = independence.pairwise_cooccurrence_test(df, game, analysis.significance_level)
     gap_test = independence.gap_distribution_test(df, game, analysis.significance_level)
+    repeat_rate = independence.repeat_rate_test(df, game, analysis.significance_level)
 
     logger.info("Running bias/drift detection...")
     hot_cold = bias_detection.hot_cold_numbers(df, game)
     drift = bias_detection.split_half_drift_test(df, game, analysis.significance_level) if analysis.split_half_drift_test else None
+    gap_hazard_trend = bias_detection.gap_hazard_trend_test(
+        df, game, history_window=config.modeling.history_window, alpha=analysis.significance_level
+    )
 
     all_results = [
         chi2_uniform,
@@ -61,6 +67,8 @@ def run_audit(df, config, out_dir: Path, run_model: bool = True) -> Path:
         ljung_box,
         cooccurrence,
         gap_test,
+        repeat_rate,
+        gap_hazard_trend,
     ]
     if drift:
         all_results.append(drift)
@@ -109,6 +117,7 @@ def run_audit(df, config, out_dir: Path, run_model: bool = True) -> Path:
         model_beats_baseline=model_beats_baseline,
         figure_paths={k: v.relative_to(out_dir) for k, v in figures.items()},
         out_path=out_dir / "report.md",
+        missing_draw_id_runs=missing_draw_id_runs,
     )
     return report_path
 

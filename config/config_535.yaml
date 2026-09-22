@@ -1,0 +1,34 @@
+# Game definition for Vietlott Power 5/35: 5 numbers drawn without
+# replacement from a pool of 35 (1..35), plus a separately-drawn bonus ball
+# from the same range that this project ignores (see data/raw/draws_535.csv
+# provenance note in README.md) -- everything here derives from pool_size/
+# draw_size, so no code changes are needed to audit a different game, only
+# a config file pointed at a matching dataset.
+game:
+  name: "Vietlott Power 5/35"
+  pool_size: 35
+  draw_size: 5
+  ticket_price_vnd: 10000
+
+data:
+  raw_dir: "data/raw"
+  processed_dir: "data/processed"
+  draws_file: "draws_535.csv"
+
+scraper:
+  base_url: "https://api.vietlott.vn/v5/desktop/vi/issearch/index/power535"
+  page_size: 50
+  max_pages: 20
+  timeout_s: 15
+  max_retries: 3
+  retry_backoff_s: 2.0
+
+analysis:
+  monte_carlo_sims: 20000
+  significance_level: 0.05
+  random_seed: 42
+  split_half_drift_test: true
+
+modeling:
+  history_window: 20
+  test_fraction: 0.2

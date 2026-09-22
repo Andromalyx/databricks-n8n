@@ -91,6 +91,7 @@ def generate_markdown_report(
     model_beats_baseline: bool,
     figure_paths: dict[str, Path],
     out_path: Path,
+    missing_draw_id_runs: list[tuple[int, int]] | None = None,
 ) -> Path:
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -100,6 +101,28 @@ def generate_markdown_report(
         "",
         f"Draws analyzed: **{n_draws}**",
         "",
+    ]
+
+    if missing_draw_id_runs:
+        total_missing = sum(end - start + 1 for start, end in missing_draw_id_runs)
+        largest = max(end - start + 1 for start, end in missing_draw_id_runs)
+        lines += [
+            "## ⚠ Data quality warning",
+            "",
+            f"**{total_missing} draw_id(s) missing** from the source history, in "
+            f"{len(missing_draw_id_runs)} run(s) (largest: {largest} consecutive draws): "
+            f"{missing_draw_id_runs}.",
+            "",
+            "Gap-based tests below (inter-appearance gaps, gap-hazard trend) compute "
+            "\"draws since last appearance\" from draw_id arithmetic, so any inter-"
+            "appearance interval that spans one of these holes gets an artificially "
+            "inflated gap. A significant gap-distribution result alongside otherwise-"
+            "clean tests is a strong hint to check here before concluding the game is "
+            "biased -- re-run on a gap-free sub-range to confirm before trusting it.",
+            "",
+        ]
+
+    lines += [
         "## Statistical test results",
         "",
         _results_table(all_results),
