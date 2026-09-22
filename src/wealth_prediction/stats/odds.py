@@ -49,3 +49,20 @@ def jackpot_odds(
     if bonus_pool_size:
         combinations *= bonus_pool_size
     return JackpotOdds(game_name, pool_size, draw_size, bonus_pool_size, combinations)
+
+
+def multi_ticket_probability(single_ticket_probability: float, n_distinct_tickets: int) -> float:
+    """P(at least one of n_distinct_tickets wins) for tickets covering DIFFERENT
+    combinations, all played against the same single draw.
+
+    This is exact (n * p), not the independent-trials approximation
+    1-(1-p)^n: with distinct tickets there's exactly one winning combination
+    per draw, so at most one of your tickets can ever match it -- the events
+    are mutually exclusive, not independent, which is what makes "just buy
+    more tickets" scale linearly rather than compound.
+    """
+    if not 0 <= single_ticket_probability <= 1:
+        raise ValueError(f"single_ticket_probability must be in [0, 1], got {single_ticket_probability}")
+    if n_distinct_tickets < 0:
+        raise ValueError(f"n_distinct_tickets must be >= 0, got {n_distinct_tickets}")
+    return min(1.0, single_ticket_probability * n_distinct_tickets)
