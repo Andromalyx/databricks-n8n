@@ -1,6 +1,13 @@
 import pytest
 
-from wealth_prediction.stats.odds import combination_count, jackpot_odds, multi_ticket_probability
+from wealth_prediction.stats.odds import (
+    PrizeTier,
+    combination_count,
+    jackpot_odds,
+    main_match_distribution,
+    multi_ticket_probability,
+    prize_table_probabilities,
+)
 
 
 def test_combination_count_matches_known_mega_645_odds():
@@ -41,3 +48,25 @@ def test_multi_ticket_probability_rejects_invalid_inputs():
         multi_ticket_probability(1.5, 5)
     with pytest.raises(ValueError):
         multi_ticket_probability(0.1, -1)
+
+
+def test_main_match_distribution_sums_to_one_and_matches_hand_calc():
+    dist = main_match_distribution(35, 5)
+    assert dist.keys() == set(range(6))
+    assert sum(dist.values()) == pytest.approx(1.0)
+    # Jackpot-tier main-match probability must equal 1 / C(35,5).
+    assert dist[5] == pytest.approx(1 / combination_count(35, 5))
+    # P(match >= 3) matches an independently hand-computed value.
+    p_at_least_3 = dist[3] + dist[4] + dist[5]
+    assert p_at_least_3 == pytest.approx(4501 / 324_632, rel=1e-9)
+
+
+def test_prize_table_probabilities_gold_split_sums_to_main_match_probability():
+    tiers = [
+        PrizeTier("with gold", main_matches=4, gold_match=True, prize_vnd=5_000_000),
+        PrizeTier("without gold", main_matches=4, gold_match=False, prize_vnd=500_000),
+    ]
+    results = prize_table_probabilities(pool_size=35, draw_size=5, gold_pool_size=12, tiers=tiers)
+    dist = main_match_distribution(35, 5)
+    total = sum(r.probability for r in results)
+    assert total == pytest.approx(dist[4])

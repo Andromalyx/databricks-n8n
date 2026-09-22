@@ -51,6 +51,63 @@ def jackpot_odds(
     return JackpotOdds(game_name, pool_size, draw_size, bonus_pool_size, combinations)
 
 
+def main_match_distribution(pool_size: int, draw_size: int) -> dict[int, float]:
+    """P(exactly k of your draw_size picks match the draw_size winning numbers), k=0..draw_size.
+
+    Standard hypergeometric overlap between your ticket and the winning
+    combination, both drawn without replacement from the same pool_size --
+    this is the distribution every "match k of n" prize tier is built from,
+    independent of any separate bonus/gold ball.
+    """
+    total = combination_count(pool_size, draw_size)
+    return {
+        k: comb(draw_size, k) * comb(pool_size - draw_size, draw_size - k) / total
+        for k in range(draw_size + 1)
+    }
+
+
+@dataclass(frozen=True)
+class PrizeTier:
+    name: str
+    main_matches: int
+    gold_match: bool | None  # True=must match gold, False=must NOT match, None=gold irrelevant
+    prize_vnd: float | None  # None for a jackpot with no fixed/published amount
+
+
+@dataclass(frozen=True)
+class PrizeTierResult:
+    tier: PrizeTier
+    probability: float
+
+    def __str__(self) -> str:  # pragma: no cover - cosmetic
+        prize = f"{self.tier.prize_vnd:,.0f} VND" if self.tier.prize_vnd is not None else "jackpot (variable)"
+        return f"{self.tier.name}: p={self.probability:.6e} (1 in {1 / self.probability:,.1f}), {prize}"
+
+
+def prize_table_probabilities(
+    pool_size: int, draw_size: int, gold_pool_size: int, tiers: list[PrizeTier]
+) -> list[PrizeTierResult]:
+    """Exact win probability for each tier of a "match k of n main numbers,
+    optionally also match/miss a 1-in-gold_pool_size bonus ball" prize table.
+
+    Each tier's main-number-match probability comes from
+    `main_match_distribution`; the gold requirement (if any) is independent
+    of which main numbers you picked, so the two multiply directly.
+    """
+    main_dist = main_match_distribution(pool_size, draw_size)
+    results = []
+    for tier in tiers:
+        p_main = main_dist[tier.main_matches]
+        if tier.gold_match is None:
+            p = p_main
+        elif tier.gold_match:
+            p = p_main / gold_pool_size
+        else:
+            p = p_main * (gold_pool_size - 1) / gold_pool_size
+        results.append(PrizeTierResult(tier, p))
+    return results
+
+
 def multi_ticket_probability(single_ticket_probability: float, n_distinct_tickets: int) -> float:
     """P(at least one of n_distinct_tickets wins) for tickets covering DIFFERENT
     combinations, all played against the same single draw.
