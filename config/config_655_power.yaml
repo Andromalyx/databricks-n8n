@@ -1,0 +1,34 @@
+# Game definition for Vietlott Power 6/55's "power" number: 1 number drawn
+# from a pool of 55 (1..55), independent of the 6-of-55 main draw. Same
+# dataset lineage as config_655.yaml (vietvudanh/vietlott-data's
+# power655.jsonl) -- data/raw/draws_655_power.csv holds the 7th element of
+# each record.
+#
+# Note: with draw_size=1, the "sum of drawn numbers" is just the one drawn
+# number, so the Gaussian-based normality tests (Shapiro, D'Agostino,
+# KS-vs-Gaussian) in stats/normality.py are not meaningful here -- a
+# discrete uniform(1,55) is never Gaussian-shaped, and a rejection there
+# reflects that mismatch, not bias. Use the Monte-Carlo-null KS test,
+# uniformity, and independence/gap tests instead; skip
+# pairwise_cooccurrence_test too (undefined for draw_size=1: no pairs exist
+# within a single-number draw).
+game:
+  name: "Vietlott Power 6/55 (power number)"
+  pool_size: 55
+  draw_size: 1
+  ticket_price_vnd: 10000
+
+data:
+  raw_dir: "data/raw"
+  processed_dir: "data/processed"
+  draws_file: "draws_655_power.csv"
+
+analysis:
+  monte_carlo_sims: 20000
+  significance_level: 0.05
+  random_seed: 42
+  split_half_drift_test: true
+
+modeling:
+  history_window: 20
+  test_fraction: 0.2
