@@ -9,12 +9,16 @@ venv/
 # source -- except the draws_*.csv datasets, which are checked in as the
 # canonical datasets (sourced from https://github.com/vietvudanh/vietlott-data,
 # MIT licensed): draws.csv is Mega 6/45, draws_535.csv is Power 5/35 main
-# numbers, draws_535_gold.csv is Power 5/35's gold/special number.
+# numbers, draws_535_gold.csv is Power 5/35's gold/special number,
+# draws_655.csv is Power 6/55 main numbers, draws_655_power.csv is its
+# power number.
 data/raw/*
 !data/raw/.gitkeep
 !data/raw/draws.csv
 !data/raw/draws_535.csv
 !data/raw/draws_535_gold.csv
+!data/raw/draws_655.csv
+!data/raw/draws_655_power.csv
 data/processed/*
 !data/processed/.gitkeep
 reports*/figures/*
